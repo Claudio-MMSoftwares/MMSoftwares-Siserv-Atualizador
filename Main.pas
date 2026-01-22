@@ -124,9 +124,12 @@ type
     function RunExternalProcess(const Executable, Params: string; out ExitCode: DWORD; const ProgressProc: TProc = nil): Boolean;
     procedure UpdateBackupProgress(const Desc: string; const Progress: Int64);
     procedure TryRestoreBackup(const Reason: string);
+    function CopyFileWin(const SourceFileName, DestFileName: string): Boolean;
+
     function BuildFirebirdConnectionString: string;
     function ExtractDatabaseFilePath(const ConnectionString: string): string;
     function GetFileSizeSafe(const APath: string): Int64;
+    function GetBackupMode: string;
     function BackupFirebirdDatabase: Boolean;
     procedure RestoreFirebirdDatabase;
   public    { Public declarations }
@@ -909,17 +912,33 @@ begin
   end;
 end;
 
+function TMainForm.CopyFileWin(const SourceFileName, DestFileName: string): Boolean;
+begin
+  Result := Winapi.Windows.CopyFile(PChar(SourceFileName), PChar(DestFileName), False);
+end;
+
+function TMainForm.GetBackupMode: string;
+begin
+  Result := LowerCase(Trim(LerConf('BACKUP', 'Modo', 'gbak')));
+end;
 function TMainForm.BackupFirebirdDatabase: Boolean;
 var
   BackupDir, BackupFile, Params, Source, SourceFilePath, GbakPath, User, Password: string;
   ExitCode: DWORD;
   SourceSize: Int64;
   ProgressLoop: TProc;
+  BackupMode: string;
 begin
   Result := False;
   BackupDir := IncludeTrailingPathDelimiter(LerConf('BACKUP', 'Diretorio', IncludeTrailingPathDelimiter(ExtractFilePath(Application.ExeName)) + 'Backups'));
   ForceDirectories(BackupDir);
-  BackupFile := BackupDir + Format('FBBackup_%s.fbk', [FormatDateTime('yyyymmdd_hhnnss', Now)]);
+  BackupMode := GetBackupMode;
+
+  if BackupMode = 'copiar_gdb' then
+    BackupFile := BackupDir + Format('GDBBackup_%s.gdb', [FormatDateTime('yyyymmdd_hhnnss', Now)])
+  else
+    BackupFile := BackupDir + Format('FBBackup_%s.fbk', [FormatDateTime('yyyymmdd_hhnnss', Now)]);
+
   Source := BuildFirebirdConnectionString;
   if Source = '' then
   begin
@@ -928,16 +947,32 @@ begin
   end;
   SourceFilePath := ExtractDatabaseFilePath(Source);
   SourceSize := GetFileSizeSafe(SourceFilePath);
-  FBackupProgressCapBytes := Max(1, SourceSize - ((SourceSize * 30) div 100));
+  FBackupProgressCapBytes := SourceSize - ((SourceSize * 30) div 100);
+  if FBackupProgressCapBytes < 1 then
+    FBackupProgressCapBytes := 1;
   FBackupProgressCapInt := GaugeValueFromInt64(FBackupProgressCapBytes);
   if FBackupProgressCapInt = 0 then
     FBackupProgressCapInt := 1;
+  AddExecLine('Criando backup do banco (' + BackupFile + ')...');
+  UpdateBackupProgress('Backup do banco em andamento 0%', 0);
+  if BackupMode = 'copiar_gdb' then
+  begin
+    if not CopyFileWin(SourceFilePath, BackupFile) then
+    begin
+      AddErrorLine('Falha ao copiar o banco para backup: ' + SysErrorMessage(GetLastError));
+      Exit;
+    end;
+    UpdateBackupProgress('Backup do banco conclu?do', FBackupProgressCapBytes);
+    FBackupProgressCapBytes := 0;
+    FBackupProgressCapInt := 0;
+    FBackupFilePath := BackupFile;
+    Result := True;
+    Exit;
+  end;
   GbakPath := LerConf('BACKUP', 'GbakPath', 'gbak');
   User := LerConf('SERVIDOR', 'User', 'SYSDBA');
   Password := decrypt(LerConf('SERVIDOR', 'Password'));
   Params := Format('-b -user "%s" -password "%s" "%s" "%s"', [User, Password, Source, BackupFile]);
-  AddExecLine('Criando backup do banco (' + BackupFile + ')...');
-  UpdateBackupProgress('Backup do banco em andamento 0%', 0);
   ProgressLoop := procedure
   var
     BackupSize, TrackedProgress: Int64;
@@ -963,12 +998,12 @@ begin
   FBackupFilePath := BackupFile;
   Result := True;
 end;
-
 procedure TMainForm.RestoreFirebirdDatabase;
 var
   Params, GbakPath, User, Password, Destination, DestinationFilePath: string;
   ExitCode: DWORD;
   TrackSize, TargetSize: Int64;
+  BackupMode: string;
   ProgressLoop: TProc;
 begin
   if (FBackupFilePath = '') or not FileExists(FBackupFilePath) then
@@ -983,6 +1018,8 @@ begin
     Exit;
   end;
   DestinationFilePath := ExtractDatabaseFilePath(Destination);
+  BackupMode := GetBackupMode;
+
   if dtmConnec.FDQuery.Active then
     dtmConnec.FDQuery.Close;
   if dtmConnec.FDQryRemoto.Active then
@@ -995,10 +1032,36 @@ begin
   TargetSize := GetFileSizeSafe(FBackupFilePath);
   if TrackSize <= 0 then
     TrackSize := TargetSize;
-  FBackupProgressCapBytes := Max(1, TrackSize - ((TrackSize * 30) div 100));
+  FBackupProgressCapBytes := TrackSize - ((TrackSize * 30) div 100);
+  if FBackupProgressCapBytes < 1 then
+    FBackupProgressCapBytes := 1;
   FBackupProgressCapInt := GaugeValueFromInt64(FBackupProgressCapBytes);
   if FBackupProgressCapInt = 0 then
     FBackupProgressCapInt := 1;
+  if BackupMode = 'copiar_gdb' then
+  begin
+    if DestinationFilePath = '' then
+    begin
+      AddErrorLine('N?o foi poss?vel determinar o caminho f?sico do banco para restaura??o.');
+      Exit;
+    end;
+    AddExecLine('Restaurando banco por c?pia de arquivo (' + FBackupFilePath + ')...');
+    UpdateBackupProgress('Restaurando backup do banco', 0);
+    if not CopyFileWin(FBackupFilePath, DestinationFilePath) then
+    begin
+      AddErrorLine('Erro ao restaurar banco por c?pia: ' + SysErrorMessage(GetLastError));
+      Exit;
+    end;
+    UpdateBackupProgress('Backup restaurado com sucesso', FBackupProgressCapBytes);
+    AddExecLine('Banco restaurado com sucesso.');
+    FBackupProgressCapBytes := 0;
+    FBackupProgressCapInt := 0;
+    FBackupFilePath := '';
+    Conectar;
+    Exit;
+  end;
+
+
   GbakPath := LerConf('BACKUP', 'GbakPath', 'gbak');
   User := LerConf('SERVIDOR', 'User', 'SYSDBA');
   Password := decrypt(LerConf('SERVIDOR', 'Password'));
@@ -1487,6 +1550,8 @@ begin
 end;
 
 end.
+
+
 
 
 
