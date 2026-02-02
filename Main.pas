@@ -149,6 +149,7 @@ var
   TotalErros: integer;
   NoVersaoCli: integer;
   VersaoSQL:string;
+  EsperarFechar: Boolean;
 
 implementation
 
@@ -763,18 +764,21 @@ begin
     dtmConnec.FDQuery.ExecSQL;
     dtmConnec.FDConnection.Commit;
 
-   { Remaining := WaitSeconds;
-    while Remaining > 0 do
+    if EsperarFechar then
     begin
-      if (Remaining = WaitSeconds) or (Remaining mod 5 = 0) then
+      Remaining := WaitSeconds;
+      while Remaining > 0 do
       begin
-        Min := Remaining div 60;
-        Sec := Remaining mod 60;
-        SetProcessStep(4, 8, Format('Aguardando fechamento (%2.2d:%2.2d)', [Min, Sec]));
+        if (Remaining = WaitSeconds) or (Remaining mod 5 = 0) then
+        begin
+          Min := Remaining div 60;
+          Sec := Remaining mod 60;
+          SetProcessStep(4, 8, Format('Aguardando fechamento (%2.2d:%2.2d)', [Min, Sec]));
+        end;
+        Sleep(1000);
+        Dec(Remaining);
       end;
-      Sleep(1000);
-      Dec(Remaining);
-    end;}
+    end;
 
     Result := True;
   except
@@ -912,11 +916,16 @@ begin
   end;
 end;
 
-function TMainForm.CopyFileWin(const SourceFileName, DestFileName: string): Boolean;
-begin
-  Result := Winapi.Windows.CopyFile(PChar(SourceFileName), PChar(DestFileName), False);
-end;
-
+function TMainForm.CopyFileWin(const SourceFileName, DestFileName: string): Boolean;
+
+begin
+
+  Result := Winapi.Windows.CopyFile(PChar(SourceFileName), PChar(DestFileName), False);
+
+end;
+
+
+
 function TMainForm.GetBackupMode: string;
 begin
   Result := LowerCase(Trim(LerConf('BACKUP', 'Modo', 'gbak')));
@@ -1461,15 +1470,22 @@ end;
 
 procedure TMainForm.btnExecutarProcessoClick(Sender: TObject);
 begin
-  TotalErros := 0;
-  TotaScripts := 0;
-  ClearExecMemo;
-  AErrorMemo.Clear;
-  SetLabelExecutados('Comandos Executados...: 0');
-  SetLabelErros('Comandos Erros........: 0');
-  SetTabErrosVisible(False);
-  SetGaugeScripts(1, 0);
-  StartProcessThread(pkAtualizacao, '');
+  try
+    EsperarFechar := False;
+
+    TotalErros := 0;
+    TotaScripts := 0;
+    ClearExecMemo;
+    AErrorMemo.Clear;
+
+    SetLabelExecutados('Comandos Executados...: 0');
+    SetLabelErros('Comandos Erros........: 0');
+    SetTabErrosVisible(False);
+    SetGaugeScripts(1, 0);
+    StartProcessThread(pkAtualizacao, '');
+  finally
+    EsperarFechar := True;
+  end;
 end;
 
 {procedure TMainForm.FDScriptSpoolPut(AEngine: TFDScript; const AMessage: string;
@@ -1536,6 +1552,7 @@ begin
   TrayIcon.Visible := True;
   if not Assigned(btTestarScripts.OnClick) then
     btTestarScripts.OnClick := btTestarScriptsClick;
+  EsperarFechar := True;
 end;
 
 procedure TMainForm.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
@@ -1550,6 +1567,7 @@ begin
 end;
 
 end.
+
 
 
 
