@@ -250,6 +250,7 @@ begin
                   begin
                     SetGauge(100, 100);
                     SetProcessStep(8, 8, 'Concluido');
+                    ReportarResultado;
                   end;
               end;
             end
@@ -612,6 +613,7 @@ begin
   SetProcessPanelVisible(False);
   SetBotoesEnabled(True);
   Timer.Enabled := True;
+  EsperarFechar := True;
 end;
 
 function TMainForm.RenomearExe: boolean;
@@ -1470,22 +1472,18 @@ end;
 
 procedure TMainForm.btnExecutarProcessoClick(Sender: TObject);
 begin
-  try
-    EsperarFechar := False;
+  EsperarFechar := False;
 
-    TotalErros := 0;
-    TotaScripts := 0;
-    ClearExecMemo;
-    AErrorMemo.Clear;
+  TotalErros := 0;
+  TotaScripts := 0;
+  ClearExecMemo;
+  AErrorMemo.Clear;
 
-    SetLabelExecutados('Comandos Executados...: 0');
-    SetLabelErros('Comandos Erros........: 0');
-    SetTabErrosVisible(False);
-    SetGaugeScripts(1, 0);
-    StartProcessThread(pkAtualizacao, '');
-  finally
-    EsperarFechar := True;
-  end;
+  SetLabelExecutados('Comandos Executados...: 0');
+  SetLabelErros('Comandos Erros........: 0');
+  SetTabErrosVisible(False);
+  SetGaugeScripts(1, 0);
+  StartProcessThread(pkAtualizacao, '');
 end;
 
 {procedure TMainForm.FDScriptSpoolPut(AEngine: TFDScript; const AMessage: string;

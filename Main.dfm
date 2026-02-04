@@ -236,7 +236,7 @@ object MainForm: TMainForm
     Top = 404
   end
   object Timer: TTimer
-    Interval = 3600000
+    Interval = 60000
     OnTimer = TimerTimer
     Left = 96
     Top = 304
